@@ -1,0 +1,4 @@
+[wokwi]
+version = 1
+firmware = 'build/Teste_Voltimetro.uf2'
+elf = 'build/ADC_DisplayC.elf'
