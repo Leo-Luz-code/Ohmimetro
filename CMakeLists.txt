@@ -30,7 +30,11 @@ pico_sdk_init()
 add_executable(${PROJECT_NAME}  
         Ohmimetro01.c  # Código principal 
         lib/ssd1306.c # Biblioteca para o display OLED
+        lib/np_led.c # Biblioteca para a matriz de LEDs
         )
+
+# Gera o arquivo de cabeçalho para o PIO
+pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/ws2818b.pio)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE 
         PICO_PRINTF_SUPPORT_FLOAT=1 
@@ -39,6 +43,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 
 target_link_libraries(${PROJECT_NAME} 
         pico_stdlib 
+        hardware_pio
         hardware_i2c
         hardware_adc
         )
