@@ -16,6 +16,7 @@
 #include "hardware/i2c.h"
 #include "lib/ssd1306.h"
 #include "lib/font.h"
+#include "lib/np_led.h"
 #define I2C_PORT i2c1
 #define I2C_SDA 14
 #define I2C_SCL 15
@@ -39,6 +40,20 @@ void gpio_irq_handler(uint gpio, uint32_t events)
 
 int main()
 {
+  npInit(MATRIX_LED_PIN); // Inicializa o LED neopixel
+
+  int primeiraCor = getIndex(1, 2);
+  int segundaCor = getIndex(2, 2);
+  int terceiraCor = getIndex(3, 2);
+
+  // Define as cores nos LEDs calculados
+  npSetLED(primeiraCor, 0, 120, 0); // Verde  (G=255, R=0, B=0)
+  npSetLED(segundaCor, 120, 0, 0);  // Vermelho (G=0, R=255, B=0)
+  npSetLED(terceiraCor, 0, 0, 120); // Azul   (G=0, R=0, B=255)
+
+  // Atualiza os LEDs fisicamente (envia os dados)
+  npWrite();
+
   // Para ser utilizado o modo BOOTSEL com botão B
   gpio_init(botaoB);
   gpio_set_dir(botaoB, GPIO_IN);
