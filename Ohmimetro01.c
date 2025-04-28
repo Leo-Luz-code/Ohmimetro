@@ -1,98 +1,220 @@
 /*
- * Por: Wilton Lacerda Silva e Leonardo Rodrigues Luz
- *    Ohmímetro utilizando o ADC da BitDogLab
+ * Ohmímetro com Reconhecimento de Código de Cores
+ * Por: Leonardo Rodrigues Luz
  *
+ * Modificado a partir do código original de Wilton Lacerda Silva
  *
- * Neste exemplo, utilizamos o ADC do RP2040 para medir a resistência de um resistor
- * desconhecido, utilizando um divisor de tensão com dois resistores.
- * O resistor conhecido é de 10k ohm e o desconhecido é o que queremos medir.
+ * Funcionalidades:
+ * 1. Mede resistência usando divisor de tensão
+ * 2. Identifica o valor comercial mais próximo (série E24 5%)
+ * 3. Exibe o código de cores no display OLED
+ * 4. Mostra as faixas coloridas em um resistor estilizado
  *
+ *  CEPEDI - TIC 37
+ *  EMBARCATECH
  */
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
 #include "hardware/i2c.h"
 #include "lib/ssd1306.h"
 #include "lib/font.h"
 #include "lib/np_led.h"
+
 #define I2C_PORT i2c1
 #define I2C_SDA 14
 #define I2C_SCL 15
 #define endereco 0x3C
-#define ADC_PIN 28 // GPIO para o voltímetro
-#define Botao_A 5  // GPIO para botão A
+#define ADC_PIN 28
+#define Botao_A 5
 #define MATRIX_LED_PIN 7
-
-int R_conhecido = 10000;   // Resistor de 10k ohm
-float R_x = 0.0;           // Resistor desconhecido
-float ADC_VREF = 3.31;     // Tensão de referência do ADC
-int ADC_RESOLUTION = 4095; // Resolução do ADC (12 bits)
-
-// Trecho para modo BOOTSEL com botão B
-#include "pico/bootrom.h"
 #define botaoB 6
+
+#include "pico/bootrom.h"
 void gpio_irq_handler(uint gpio, uint32_t events)
 {
   reset_usb_boot(0, 0);
 }
 
+// Valores da série E24 com tolerância 5%
+const int e24_series[] = {
+    100, 110, 120, 130, 150, 160, 180, 200, 220, 240, 270, 300,
+    330, 360, 390, 430, 470, 510, 560, 620, 680, 750, 820, 910};
+
+// Cores do código de resistores (em RGB para o display)
+const uint8_t resistor_colors[12][3] = {
+    {0, 0, 0},       // Preto
+    {139, 69, 19},   // Marrom
+    {255, 0, 0},     // Vermelho
+    {255, 69, 0},    // Laranja
+    {255, 255, 0},   // Amarelo
+    {0, 255, 0},     // Verde
+    {0, 0, 255},     // Azul
+    {128, 0, 128},   // Violeta
+    {128, 128, 128}, // Cinza
+    {255, 255, 255}, // Branco
+    {212, 175, 55},  // Dourado
+    {192, 192, 192}  // Prateado
+};
+
+int R_conhecido = 10000;   // Resistor de 10k ohm
+float ADC_VREF = 3.31;     // Tensão de referência do ADC
+int ADC_RESOLUTION = 4095; // Resolução do ADC (12 bits)
+
+// Estrutura para armazenar as faixas do resistor
+typedef struct
+{
+  int digit1;
+  int digit2;
+  int multiplier;
+} ResistorBands;
+
+// Função para encontrar o valor E24 mais próximo
+int find_closest_e24(float measured)
+{
+  int decade = (int)pow(10, (int)log10(measured));
+  float normalized = measured / decade;
+
+  int closest = e24_series[0];
+  float min_diff = fabs(normalized - (e24_series[0] / 100.0));
+
+  for (int i = 1; i < 24; i++)
+  {
+    float diff = fabs(normalized - (e24_series[i] / 100.0));
+    if (diff < min_diff)
+    {
+      min_diff = diff;
+      closest = e24_series[i];
+    }
+  }
+
+  // Ajustar para a década correta
+  int result = closest * (decade / 100);
+  return result;
+}
+
+// Função para determinar as faixas do resistor
+ResistorBands determine_bands(int value)
+{
+  ResistorBands bands;
+
+  if (value < 10)
+  {
+    bands.digit1 = 0;
+    bands.digit2 = value;
+    bands.multiplier = 0;
+  }
+  else if (value < 100)
+  {
+    bands.digit1 = value / 10;
+    bands.digit2 = value % 10;
+    bands.multiplier = 1;
+  }
+  else
+  {
+    int decade = (int)pow(10, (int)log10(value) - 1);
+    bands.digit1 = (value / decade) / 10;
+    bands.digit2 = (value / decade) % 10;
+    bands.multiplier = (int)log10(value) - 1;
+  }
+
+  return bands;
+}
+
+/*
+ * Função para exibir as faixas do resistor como texto
+ */
+void display_resistor_bands(ssd1306_t ssd, ResistorBands bands)
+{
+  // Nomes das cores correspondentes aos dígitos
+  const char *color_names[] = {
+      "Preto", "Marrom", "Vermelho", "Laranja", "Amarelo",
+      "Verde", "Azul", "Violeta", "Cinza", "Branco",
+      "Dourado", "Prateado"};
+
+  // Exibe as faixas como texto
+  char band1_str[20], band2_str[20], band3_str[20];
+
+  // Primeira faixa
+  snprintf(band1_str, sizeof(band1_str), "1a: %s", color_names[bands.digit1]);
+  ssd1306_draw_string(&ssd, band1_str, 5, 30);
+
+  // Segunda faixa
+  snprintf(band2_str, sizeof(band2_str), "2a: %s", color_names[bands.digit2]);
+  ssd1306_draw_string(&ssd, band2_str, 5, 40);
+
+  // Multiplicador
+  snprintf(band3_str, sizeof(band3_str), "Mult: %s", color_names[bands.multiplier]);
+  ssd1306_draw_string(&ssd, band3_str, 5, 50);
+}
+
+// Função para mostrar cores nos LEDs Neopixel
+void show_bands_on_leds(ResistorBands bands)
+{
+  npSetLED(getIndex(3, 2), resistor_colors[bands.digit1][0],
+           resistor_colors[bands.digit1][1],
+           resistor_colors[bands.digit1][2]);
+
+  npSetLED(getIndex(2, 2), resistor_colors[bands.digit2][0],
+           resistor_colors[bands.digit2][1],
+           resistor_colors[bands.digit2][2]);
+
+  npSetLED(getIndex(1, 2), resistor_colors[bands.multiplier][0],
+           resistor_colors[bands.multiplier][1],
+           resistor_colors[bands.multiplier][2]);
+
+  npWrite();
+}
+
 int main()
 {
-  npInit(MATRIX_LED_PIN); // Inicializa o LED neopixel
+  stdio_init_all();
 
-  int primeiraCor = getIndex(1, 2);
-  int segundaCor = getIndex(2, 2);
-  int terceiraCor = getIndex(3, 2);
+  // Inicializa LEDs Neopixel
+  npInit(MATRIX_LED_PIN);
 
-  // Define as cores nos LEDs calculados
-  npSetLED(primeiraCor, 0, 120, 0); // Verde  (G=255, R=0, B=0)
-  npSetLED(segundaCor, 120, 0, 0);  // Vermelho (G=0, R=255, B=0)
-  npSetLED(terceiraCor, 0, 0, 120); // Azul   (G=0, R=0, B=255)
-
-  // Atualiza os LEDs fisicamente (envia os dados)
-  npWrite();
-
-  // Para ser utilizado o modo BOOTSEL com botão B
+  // Configura botão B para modo BOOTSEL
   gpio_init(botaoB);
   gpio_set_dir(botaoB, GPIO_IN);
   gpio_pull_up(botaoB);
   gpio_set_irq_enabled_with_callback(botaoB, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
-  // Aqui termina o trecho para modo BOOTSEL com botão B
 
+  // Configura botão A
   gpio_init(Botao_A);
   gpio_set_dir(Botao_A, GPIO_IN);
   gpio_pull_up(Botao_A);
 
-  // I2C Initialisation. Using it at 400Khz.
+  // Inicializa I2C e display OLED
   i2c_init(I2C_PORT, 400 * 1000);
+  gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
+  gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
+  gpio_pull_up(I2C_SDA);
+  gpio_pull_up(I2C_SCL);
 
-  gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);                    // Set the GPIO pin function to I2C
-  gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);                    // Set the GPIO pin function to I2C
-  gpio_pull_up(I2C_SDA);                                        // Pull up the data line
-  gpio_pull_up(I2C_SCL);                                        // Pull up the clock line
-  ssd1306_t ssd;                                                // Inicializa a estrutura do display
-  ssd1306_init(&ssd, WIDTH, HEIGHT, false, endereco, I2C_PORT); // Inicializa o display
-  ssd1306_config(&ssd);                                         // Configura o display
-  ssd1306_send_data(&ssd);                                      // Envia os dados para o display
+  ssd1306_t ssd;
+  ssd1306_init(&ssd, WIDTH, HEIGHT, false, endereco, I2C_PORT);
+  ssd1306_config(&ssd);
+  ssd1306_send_data(&ssd);
 
-  // Limpa o display. O display inicia com todos os pixels apagados.
+  // Limpa o display
   ssd1306_fill(&ssd, false);
   ssd1306_send_data(&ssd);
 
+  // Inicializa ADC
   adc_init();
-  adc_gpio_init(ADC_PIN); // GPIO 28 como entrada analógica
+  adc_gpio_init(ADC_PIN);
 
-  float tensao;
-  char str_x[5]; // Buffer para armazenar a string
-  char str_y[5]; // Buffer para armazenar a string
+  char resistance_str[20];
+  // char e24_str[20];
 
-  bool cor = true;
   while (true)
   {
-    adc_select_input(2); // Seleciona o ADC para eixo X. O pino 28 como entrada analógica
+    adc_select_input(2); // Seleciona o ADC para o pino 28
 
+    // Faz a média de 500 leituras para maior precisão
     float soma = 0.0f;
     for (int i = 0; i < 500; i++)
     {
@@ -101,27 +223,47 @@ int main()
     }
     float media = soma / 500.0f;
 
-    // Fórmula simplificada: R_x = R_conhecido * ADC_encontrado /(ADC_RESOLUTION - adc_encontrado)
-    R_x = (R_conhecido * media) / (ADC_RESOLUTION - media);
+    // Calcula a resistência desconhecida
+    float R_x = (R_conhecido * media) / (ADC_RESOLUTION - media);
 
-    sprintf(str_x, "%1.0f", media); // Converte o inteiro em string
-    sprintf(str_y, "%1.0f", R_x);   // Converte o float em string
+    // Encontra o valor comercial mais próximo
+    int e24_value = find_closest_e24(R_x);
 
-    // cor = !cor;
-    //  Atualiza o conteúdo do display com animações
-    ssd1306_fill(&ssd, !cor);                          // Limpa o display
-    ssd1306_rect(&ssd, 3, 3, 122, 60, cor, !cor);      // Desenha um retângulo
-    ssd1306_line(&ssd, 3, 25, 123, 25, cor);           // Desenha uma linha
-    ssd1306_line(&ssd, 3, 37, 123, 37, cor);           // Desenha uma linha
-    ssd1306_draw_string(&ssd, "CEPEDI   TIC37", 8, 6); // Desenha uma string
-    ssd1306_draw_string(&ssd, "EMBARCATECH", 20, 16);  // Desenha uma string
-    ssd1306_draw_string(&ssd, "  Ohmimetro", 10, 28);  // Desenha uma string
-    ssd1306_draw_string(&ssd, "ADC", 13, 41);          // Desenha uma string
-    ssd1306_draw_string(&ssd, "Resisten.", 50, 41);    // Desenha uma string
-    ssd1306_line(&ssd, 44, 37, 44, 60, cor);           // Desenha uma linha vertical
-    ssd1306_draw_string(&ssd, str_x, 8, 52);           // Desenha uma string
-    ssd1306_draw_string(&ssd, str_y, 59, 52);          // Desenha uma string
-    ssd1306_send_data(&ssd);                           // Atualiza o display
-    sleep_ms(700);
+    // Determina as faixas do resistor
+    ResistorBands bands = determine_bands(e24_value);
+
+    // Prepara strings para exibição
+    if (R_x >= 1000)
+    {
+      sprintf(resistance_str, "%.1fk", R_x / 1000);
+    }
+    else
+    {
+      sprintf(resistance_str, "%.0f", R_x);
+    }
+    // sprintf(e24_str, "E24: %d", e24_value);
+
+    // Atualiza o display
+    ssd1306_fill(&ssd, false);
+
+    // Cabeçalho
+    ssd1306_draw_string(&ssd, "Ohmimetro E24", 15, 0);
+    ssd1306_line(&ssd, 0, 10, 127, 10, true);
+
+    // Valores medidos
+    ssd1306_draw_string(&ssd, "Medido:", 5, 15);
+    ssd1306_draw_string(&ssd, resistance_str, 60, 15);
+
+    // ssd1306_draw_string(&ssd, "Padrao:", 5, 25);
+    // ssd1306_draw_string(&ssd, e24_str, 60, 25);
+
+    // Exibe as faixas como texto
+    display_resistor_bands(ssd, bands);
+
+    // Atualiza LEDs Neopixel (opcional - mantém as cores físicas)
+    show_bands_on_leds(bands);
+
+    ssd1306_send_data(&ssd);
+    sleep_ms(500);
   }
 }
