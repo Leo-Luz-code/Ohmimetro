@@ -44,20 +44,19 @@ const int e24_series[] = {
     100, 110, 120, 130, 150, 160, 180, 200, 220, 240, 270, 300,
     330, 360, 390, 430, 470, 510, 560, 620, 680, 750, 820, 910};
 
-// Cores do código de resistores (em RGB para o display)
 const uint8_t resistor_colors[12][3] = {
-    {0, 0, 0},       // Preto
-    {139, 69, 19},   // Marrom
-    {255, 0, 0},     // Vermelho
-    {255, 69, 0},    // Laranja
-    {255, 255, 0},   // Amarelo
-    {0, 255, 0},     // Verde
-    {0, 0, 255},     // Azul
-    {128, 0, 128},   // Violeta
-    {128, 128, 128}, // Cinza
-    {255, 255, 255}, // Branco
-    {212, 175, 55},  // Dourado
-    {192, 192, 192}  // Prateado
+    {0, 0, 0},    // Preto
+    {37, 18, 0},  // Marrom
+    {63, 0, 0},   // Vermelho
+    {63, 17, 0},  // Laranja
+    {63, 63, 0},  // Amarelo
+    {0, 63, 0},   // Verde
+    {0, 0, 63},   // Azul
+    {32, 0, 32},  // Violeta
+    {32, 32, 32}, // Cinza
+    {63, 63, 63}, // Branco
+    {53, 43, 13}, // Dourado
+    {48, 48, 48}  // Prateado
 };
 
 int R_conhecido = 10000;   // Resistor de 10k ohm
